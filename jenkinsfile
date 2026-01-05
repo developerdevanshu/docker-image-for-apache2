@@ -1,0 +1,75 @@
+pipeline {
+    agent any
+
+    environment {
+        // AWS Account and Region
+        AWS_ACCOUNT_ID = '123456789012'        // Replace with your AWS account ID
+        AWS_REGION     = 'ap-south-1'          // Replace with your AWS region
+
+        // Docker / ECR
+        ECR_REPO       = 'my-app'              // Replace with your ECR repo name
+        IMAGE_TAG      = 'v2'                  // Replace with your image tag
+
+        // ECS
+        TASK_FAMILY    = 'my-task-family'      // ECS task definition family
+        CLUSTER_NAME   = 'my-cluster'          // ECS cluster name
+        SERVICE_NAME   = 'my-service'          // ECS service name
+        CONTAINER_NAME = 'my-container'        // ECS container name in task definition
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/username/my-app.git'
+                // If using local code, you can remove the above and use dir() instead
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${ECR_REPO}:${IMAGE_TAG} ."
+            }
+        }
+
+        stage('Login to ECR') {
+            steps {
+                sh """
+                aws ecr get-login-password --region ${AWS_REGION} | \
+                docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                """
+            }
+        }
+
+        stage('Push Docker Image to ECR') {
+            steps {
+                sh """
+                docker tag ${ECR_REPO}:${IMAGE_TAG} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+                docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}
+                """
+            }
+        }
+
+        stage('Register ECS Task Definition') {
+            steps {
+                sh """
+                aws ecs register-task-definition \
+                    --family ${TASK_FAMILY} \
+                    --container-definitions '[{"name": "${CONTAINER_NAME}","image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}","memory":512,"cpu":256,"essential":true,"portMappings":[{"containerPort":80,"hostPort":80}]}]'
+                """
+            }
+        }
+
+        stage('Update ECS Service') {
+            steps {
+                sh """
+                aws ecs update-service \
+                    --cluster ${CLUSTER_NAME} \
+                    --service ${SERVICE_NAME} \
+                    --task-definition ${TASK_FAMILY}
+                """
+            }
+        }
+
+    }
+}
