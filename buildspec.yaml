@@ -4,37 +4,39 @@ env:
   variables:
     AWS_REGION: ap-northeast-3
     ECR_REPO: nginx-image
-    AWS_ACCOUNT_ID: 044221706886   # Your AWS Account ID for ECR login & push
-    IMAGE_NAME: container-5-1-26   # Container name used in imagedefinitions.json
+    AWS_ACCOUNT_ID: 044221706886
+    IMAGE_NAME: container-5-1-26
 
 phases:
   pre_build:
-    commands:
-      - echo "Starting pre_build phase..."
-      - aws --version
-      - echo "Logging in to ECR..."
-      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+    commands: |
+      echo "Starting pre_build phase..."
+      echo "AWS CLI version:"
+      aws --version
+      echo "Logging in to ECR..."
+      aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
   build:
-  commands:
-    - echo "Starting build phase..."
-    - echo "CODEBUILD_RESOLVED_SOURCE_VERSION=$CODEBUILD_RESOLVED_SOURCE_VERSION"
-    - |
+    commands: |
+      echo "Starting build phase..."
+      echo "CODEBUILD_RESOLVED_SOURCE_VERSION=$CODEBUILD_RESOLVED_SOURCE_VERSION"
+      # Generate IMAGE_TAG with safe fallback to 'latest'
       IMAGE_TAG=$(echo ${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest} | cut -c 1-7)
       echo "IMAGE_TAG=$IMAGE_TAG"
+      echo "Building Docker image..."
       docker build -t $ECR_REPO:$IMAGE_TAG .
+      echo "Tagging Docker image for ECR..."
       docker tag $ECR_REPO:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
 
-
   post_build:
-    commands:
-      - echo "Starting post_build phase..."
+    commands: |
+      echo "Starting post_build phase..."
       # Ensure ECR repo exists
-      - aws ecr describe-repositories --repository-names $ECR_REPO || aws ecr create-repository --repository-name $ECR_REPO
-      - echo "Pushing Docker image to ECR: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG"
-      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
-      - echo "Creating imagedefinitions.json for ECS deployment..."
-      - printf '[{"name":"%s","imageUri":"%s"}]' $IMAGE_NAME $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG > imagedefinitions.json
+      aws ecr describe-repositories --repository-names $ECR_REPO || aws ecr create-repository --repository-name $ECR_REPO
+      echo "Pushing Docker image to ECR..."
+      docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+      echo "Creating imagedefinitions.json for ECS deployment..."
+      printf '[{"name":"%s","imageUri":"%s"}]' $IMAGE_NAME $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG > imagedefinitions.json
 
 artifacts:
   files:
